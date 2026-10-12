@@ -128,4 +128,80 @@ if st.button("🚀 Generar Cronograma", type="primary", use_container_width=True
             dia_p = min(dia_pago, ult_dia)
             fecha_actual = datetime.date(anio_siguiente, mes_siguiente, dia_p)
             
-    elif
+    elif "Alemán" in sistema:
+        # La amortización fija se calcula sobre el NUEVO MONTO
+        amortizacion = monto_capitalizado / n_cuotas
+        
+        for i in range(1, int(n_cuotas) + 1):
+            interes = saldo * tasa_periodo
+            seguro = saldo * tasa_desgravamen_periodo
+            
+            cuota_total = amortizacion + interes + seguro
+            saldo -= amortizacion
+            
+            if i == int(n_cuotas):
+                saldo = 0
+                
+            cronograma.append([i, fecha_actual.strftime("%d/%m/%Y"), amortizacion, interes, seguro, cuota_total, max(0, saldo)])
+            
+            # Calcular siguiente fecha de pago
+            mes_siguiente = fecha_actual.month + 1
+            anio_siguiente = fecha_actual.year
+            if mes_siguiente > 12:
+                mes_siguiente = 1
+                anio_siguiente += 1
+            
+            ult_dia = calendar.monthrange(anio_siguiente, mes_siguiente)[1]
+            dia_p = min(dia_pago, ult_dia)
+            fecha_actual = datetime.date(anio_siguiente, mes_siguiente, dia_p)
+
+    # Creación del DataFrame
+    columnas = ["Periodo", "Fecha de Pago", "Amortización de Capital", "Interés", "Seguro Desgravamen", "Cuota Total", "Saldo Deudor"]
+    df = pd.DataFrame(cronograma, columns=columnas)
+    
+    # Métricas clave (actualizadas con el nuevo monto)
+    st.subheader("📊 Resumen del Crédito")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Monto Total Financiado (Cap. + Gracia)", f"S/ {monto_capitalizado:,.2f}")
+    col2.metric("Total Intereses (Regulares)", f"S/ {df['Interés'].sum():,.2f}")
+    col3.metric("Total Seguro (Regulares)", f"S/ {df['Seguro Desgravamen'].sum():,.2f}")
+    col4.metric("Total a Pagar", f"S/ {df['Cuota Total'].sum():,.2f}")
+
+    # Mostrar tabla interactiva
+    st.subheader("🗓️ Cronograma de Pagos")
+    st.dataframe(
+        df.style.format({
+            "Amortización de Capital": "{:,.2f}",
+            "Interés": "{:,.2f}",
+            "Seguro Desgravamen": "{:,.2f}",
+            "Cuota Total": "{:,.2f}",
+            "Saldo Deudor": "{:,.2f}"
+        }), 
+        use_container_width=True, 
+        hide_index=True
+    )
+
+    # Exportar a Excel en memoria
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Cronograma')
+        
+        workbook = writer.book
+        worksheet = writer.sheets['Cronograma']
+        money_format = workbook.add_format({'num_format': '#,##0.00'})
+        date_format = workbook.add_format({'align': 'center'})
+        
+        worksheet.set_column('A:A', 10, date_format)
+        worksheet.set_column('B:B', 15, date_format)
+        worksheet.set_column('C:G', 20, money_format)
+        
+    excel_data = output.getvalue()
+
+    # Botón de descarga
+    st.download_button(
+        label="📥 Descargar Cronograma en Excel",
+        data=excel_data,
+        file_name="Cronograma_Prestamo_Pro.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
