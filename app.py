@@ -8,7 +8,7 @@ import calendar
 st.set_page_config(page_title="Simulador de Préstamos Pro", page_icon="🏦", layout="wide")
 
 st.title("🏦 Simulador Avanzado de Préstamos")
-st.markdown("Genera tu cronograma de pagos interactivo y expórtalo a Excel. Incluye cálculo de **días de gracia** para la primera cuota.")
+st.markdown("Genera tu cronograma de pagos interactivo y expórtalo a Excel. Incluye cálculo de **días de gracia** con capitalización al principal.")
 
 # Barra lateral para parámetros
 with st.sidebar:
@@ -71,39 +71,42 @@ dias_primer_periodo = (fecha_primer_pago - fecha_desembolso).days
 # Calcular días de gracia (Días que exceden a un mes estándar de 30 días)
 dias_gracia = max(0, dias_primer_periodo - 30)
 
-st.info(f"📅 **Primer pago:** {fecha_primer_pago.strftime('%d/%m/%Y')} | **Días hasta el primer pago:** {dias_primer_periodo} días (Incluye {dias_gracia} días de gracia)")
+# ---------------- NUEVA LÓGICA DE CAPITALIZACIÓN ----------------
+# Calculamos el interés y seguro de los días de gracia
+interes_gracia = monto * ((1 + tasa_anual)**(dias_gracia/360) - 1)
+seguro_gracia = monto * (tasa_desgravamen_diaria * dias_gracia)
+
+# Capitalizamos: El nuevo monto a financiar (Monto Préstamo Capitalizado)
+monto_capitalizado = monto + interes_gracia + seguro_gracia
+
+st.info(f"""
+📅 **Primer pago:** {fecha_primer_pago.strftime('%d/%m/%Y')} | **Días hasta el primer pago:** {dias_primer_periodo} días (Incluye {dias_gracia} días de gracia)
+📈 **Capitalización:** Intereses (S/{interes_gracia:.2f}) y Seguro (S/{seguro_gracia:.2f}) de los días de gracia se han sumado al principal.
+💰 **Nuevo Monto a Financiar:** S/ {monto_capitalizado:,.2f}
+""")
+# ----------------------------------------------------------------
 
 # Botón generador
 if st.button("🚀 Generar Cronograma", type="primary", use_container_width=True):
-    saldo = monto
+    # El saldo inicial ahora es el monto capitalizado
+    saldo = monto_capitalizado
     cronograma = []
     fecha_actual = fecha_primer_pago
     
     if "Francés" in sistema:
         tasa_total_periodo = tasa_periodo + tasa_desgravamen_periodo
         
-        # Fórmula de cuota fija (anualidad)
+        # Fórmula de cuota fija (anualidad) aplicada al NUEVO MONTO
         if tasa_total_periodo > 0:
-            cuota_total_fija = (tasa_total_periodo * monto) / (1 - (1 + tasa_total_periodo)**-n_cuotas)
+            cuota_total_fija = (tasa_total_periodo * monto_capitalizado) / (1 - (1 + tasa_total_periodo)**-n_cuotas)
         else:
-            cuota_total_fija = monto / n_cuotas
+            cuota_total_fija = monto_capitalizado / n_cuotas
             
-        # Calcular interés de días de gracia (solo afecta a la primera cuota)
-        interes_gracia = saldo * ((1 + tasa_anual)**(dias_gracia/360) - 1)
-        seguro_gracia = saldo * (tasa_desgravamen_diaria * dias_gracia)
-        
         for i in range(1, int(n_cuotas) + 1):
             interes = saldo * tasa_periodo
             seguro = saldo * tasa_desgravamen_periodo
             
-            # Si es la primera cuota, sumamos el costo de los días de gracia
-            if i == 1:
-                interes += interes_gracia
-                seguro += seguro_gracia
-                cuota_actual = cuota_total_fija + interes_gracia + seguro_gracia
-            else:
-                cuota_actual = cuota_total_fija
-            
+            cuota_actual = cuota_total_fija
             amortizacion = cuota_actual - interes - seguro
             
             if i == int(n_cuotas):
@@ -125,86 +128,4 @@ if st.button("🚀 Generar Cronograma", type="primary", use_container_width=True
             dia_p = min(dia_pago, ult_dia)
             fecha_actual = datetime.date(anio_siguiente, mes_siguiente, dia_p)
             
-    elif "Alemán" in sistema:
-        amortizacion = monto / n_cuotas
-        
-        interes_gracia = saldo * ((1 + tasa_anual)**(dias_gracia/360) - 1)
-        seguro_gracia = saldo * (tasa_desgravamen_diaria * dias_gracia)
-        
-        for i in range(1, int(n_cuotas) + 1):
-            interes = saldo * tasa_periodo
-            seguro = saldo * tasa_desgravamen_periodo
-            
-            if i == 1:
-                interes += interes_gracia
-                seguro += seguro_gracia
-                
-            cuota_total = amortizacion + interes + seguro
-            saldo -= amortizacion
-            
-            if i == int(n_cuotas):
-                saldo = 0
-                
-            cronograma.append([i, fecha_actual.strftime("%d/%m/%Y"), amortizacion, interes, seguro, cuota_total, max(0, saldo)])
-            
-            # Calcular siguiente fecha de pago
-            mes_siguiente = fecha_actual.month + 1
-            anio_siguiente = fecha_actual.year
-            if mes_siguiente > 12:
-                mes_siguiente = 1
-                anio_siguiente += 1
-            
-            ult_dia = calendar.monthrange(anio_siguiente, mes_siguiente)[1]
-            dia_p = min(dia_pago, ult_dia)
-            fecha_actual = datetime.date(anio_siguiente, mes_siguiente, dia_p)
-
-    # Creación del DataFrame
-    columnas = ["Periodo", "Fecha de Pago", "Amortización de Capital", "Interés", "Seguro Desgravamen", "Cuota Total", "Saldo Deudor"]
-    df = pd.DataFrame(cronograma, columns=columnas)
-    
-    # Métricas clave
-    st.subheader("📊 Resumen del Crédito")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Monto Total a Financiar", f"S/ {monto:,.2f}")
-    col2.metric("Total Intereses", f"S/ {df['Interés'].sum():,.2f}")
-    col3.metric("Total Seguro Desgravamen", f"S/ {df['Seguro Desgravamen'].sum():,.2f}")
-    col4.metric("Total a Pagar (Capital + Costos)", f"S/ {df['Cuota Total'].sum():,.2f}")
-
-    # Mostrar tabla interactiva
-    st.subheader("🗓️ Cronograma de Pagos")
-    st.dataframe(
-        df.style.format({
-            "Amortización de Capital": "{:,.2f}",
-            "Interés": "{:,.2f}",
-            "Seguro Desgravamen": "{:,.2f}",
-            "Cuota Total": "{:,.2f}",
-            "Saldo Deudor": "{:,.2f}"
-        }), 
-        use_container_width=True, 
-        hide_index=True
-    )
-
-    # Exportar a Excel en memoria
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Cronograma')
-        
-        workbook = writer.book
-        worksheet = writer.sheets['Cronograma']
-        money_format = workbook.add_format({'num_format': '#,##0.00'})
-        date_format = workbook.add_format({'align': 'center'})
-        
-        worksheet.set_column('A:A', 10, date_format)
-        worksheet.set_column('B:B', 15, date_format)
-        worksheet.set_column('C:G', 20, money_format)
-        
-    excel_data = output.getvalue()
-
-    # Botón de descarga
-    st.download_button(
-        label="📥 Descargar Cronograma en Excel",
-        data=excel_data,
-        file_name="Cronograma_Prestamo_Pro.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+    elif
